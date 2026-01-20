@@ -1,6 +1,20 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import {RedisConnect, RedisTopic, redisSchema} from './entity/redisParam'
-import { createClient} from 'redis'
+import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { createClient } from 'redis';
+// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+// eslint-disable-next-line import/no-unresolved
+// @ts-ignore - supabase types resolved at build time
+import { SupabaseClient } from '@supabase/supabase-js';
+import { RedisConnect, RedisTopic, redisSchema } from './entity/redisParam.entity';
+
+type TelemetryInsert = {
+  ppp_id: string;
+  ts: string;
+  event_type: string;
+  data: Record<string, any>;
+};
 
 @Injectable()
 export class RedisSubscriberService implements OnModuleDestroy, OnModuleInit {
@@ -9,9 +23,13 @@ export class RedisSubscriberService implements OnModuleDestroy, OnModuleInit {
   private redisConnect:RedisConnect;
   private redisTopic:RedisTopic;
 
+  constructor(
+    @Inject('SUPABASE_CLIENT')
+    private readonly supabase: SupabaseClient,
+  ) {}
+
   async onModuleInit() {    
     console.log('onModuleInit')
-    const url = process.env.REDIS_URL;
     const host = process.env.REDIS_HOST;
     const port = Number(process.env.REDIS_PORT);
     const user = process.env.REDIS_USER;
@@ -68,15 +86,37 @@ export class RedisSubscriberService implements OnModuleDestroy, OnModuleInit {
 
   async subsrcibe(){
     await this.redisClient.subscribe(this.redisTopic.topic, 
-        (message, channelName) => {
+        async (message, channelName) => {
             this.logger.log('________________')
             this.logger.log(message)
             this.logger.log(channelName)
+            const pppTelemetry: TelemetryInsert = {
+              ppp_id:'vsg-ppp-001',
+              ts: new Date(Date.now()).toISOString(),
+              event_type:'telemetry/health',
+              data:JSON.parse(message)
+            }
+            await this.persistTelemetry(pppTelemetry)
         }
     )
   }
 
+  async persistTelemetry(pppTelemetry: TelemetryInsert) {
+    try {
+      const { error } = await this.supabase
+        .from('ppp_telemetry')
+        .insert(pppTelemetry);
+
+      if (error) {
+        throw error;
+      }
+    } catch(err) {
+      this.logger.error(err)
+    }
+  }
+
   async onModuleDestroy() {
-      
+      this.logger.log('onModuleDestroy')
+      this.logger.log('good bye')
   }
 }
