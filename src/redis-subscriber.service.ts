@@ -75,28 +75,35 @@ export class RedisSubscriberService implements OnModuleDestroy, OnModuleInit {
 
     // handle errors with call back
     this.redisClient.on('error', (err)=>{
-        this.logger.error(`redis error -> ${err}`)
+        this.logger.error(`redis error -> ${err}`);
     })
 
-    console.log('created client ok')
-    await this.redisClient.connect()
-    await this.subsrcibe()
+    console.log('created client ok');
+    await this.redisClient.connect();
+    await this.subsrcibe();
     return true;
+  }
+
+  async parseMessage(data: any): Promise<TelemetryInsert[]> {
+    const parsed = typeof data === 'string' ? JSON.parse(data) : data;
+    const rows = Array.isArray(parsed) ? parsed : [parsed];
+    return rows.map((item) => {
+      return {
+        ppp_id:'vsg-ppp-002',
+        ts: new Date(Date.now()).toISOString(),
+        event_type:'telemetry/health',
+        data:JSON.parse(item)
+      }
+    })
   }
 
   async subsrcibe(){
     await this.redisClient.subscribe(this.redisTopic.topic, 
         async (message, channelName) => {
-            this.logger.log('________________')
-            this.logger.log(message)
-            this.logger.log(channelName)
-            const pppTelemetry: TelemetryInsert = {
-              ppp_id:'vsg-ppp-001',
-              ts: new Date(Date.now()).toISOString(),
-              event_type:'telemetry/health',
-              data:JSON.parse(message)
+            const rows = await this.parseMessage(message);
+            if (rows.length > 0) {
+              await Promise.all(rows.map((item) => this.persistTelemetry(item)));
             }
-            await this.persistTelemetry(pppTelemetry)
         }
     )
   }
